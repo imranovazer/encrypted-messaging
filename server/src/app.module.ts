@@ -4,6 +4,9 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { User } from './entities/user.entity';
 import { Message } from './entities/message.entity';
+import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
+import { MessagesModule } from './messages/messages.module';
 
 @Module({
   imports: [
@@ -18,6 +21,9 @@ import { Message } from './entities/message.entity';
       synchronize: process.env.NODE_ENV !== 'production', // Auto-create tables in development
     }),
     TypeOrmModule.forFeature([User, Message]),
+    AuthModule,
+    UsersModule,
+    MessagesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
