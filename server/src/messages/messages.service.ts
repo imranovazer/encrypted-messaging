@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Message } from '../entities/message.entity';
 import { User } from '../entities/user.entity';
 import { SendMessageDto } from './dto/send-message.dto';
+import { ChatGateway } from '../gateway/chat.gateway';
 
 @Injectable()
 export class MessagesService {
@@ -12,6 +13,8 @@ export class MessagesService {
     private messageRepository: Repository<Message>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @Inject(forwardRef(() => ChatGateway))
+    private chatGateway: ChatGateway,
   ) {}
 
   async sendMessage(senderId: string, sendMessageDto: SendMessageDto) {
@@ -35,7 +38,37 @@ export class MessagesService {
       signature: signature || null,
     });
 
-    return this.messageRepository.save(message);
+    const savedMessage = await this.messageRepository.save(message);
+
+    // Load relations for emitting
+    const messageWithRelations = await this.messageRepository.findOne({
+      where: { id: savedMessage.id },
+      relations: ['sender', 'recipient'],
+    });
+
+    // Emit new message event to recipient via WebSocket
+    if (messageWithRelations) {
+      const messagePayload = {
+        id: messageWithRelations.id,
+        senderId: messageWithRelations.senderId,
+        recipientId: messageWithRelations.recipientId,
+        sender: {
+          id: messageWithRelations.sender.id,
+          username: messageWithRelations.sender.username,
+        },
+        recipient: {
+          id: messageWithRelations.recipient.id,
+          username: messageWithRelations.recipient.username,
+        },
+        encryptedContent: messageWithRelations.encryptedContent,
+        encryptedAesKey: messageWithRelations.encryptedAesKey,
+        signature: messageWithRelations.signature,
+        timestamp: messageWithRelations.timestamp,
+      };
+      await this.chatGateway.emitNewMessage(messagePayload);
+    }
+
+    return savedMessage;
   }
 
   async getMessages(userId: string, otherUserId?: string) {
