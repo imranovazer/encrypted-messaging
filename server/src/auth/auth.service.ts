@@ -6,6 +6,7 @@ import * as bcrypt from 'bcrypt';
 import { User } from '../entities/user.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { BCRYPT_SALT_ROUNDS } from '../common/constants';
 
 @Injectable()
 export class AuthService {
@@ -27,9 +28,7 @@ export class AuthService {
       throw new ConflictException('Username already exists');
     }
 
-    // Hash password
-    const saltRounds = 10;
-    const passwordHash = await bcrypt.hash(password, saltRounds);
+    const passwordHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 
     // Create user
     const user = this.userRepository.create({
@@ -40,7 +39,30 @@ export class AuthService {
 
     await this.userRepository.save(user);
 
-    // Generate JWT token
+    return this.generateAuthResponse(user);
+  }
+
+  async login(loginDto: LoginDto) {
+    const { username, password } = loginDto;
+
+    const user = await this.userRepository.findOne({
+      where: { username },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    return this.generateAuthResponse(user);
+  }
+
+  private generateAuthResponse(user: User) {
     const payload = { sub: user.id, username: user.username };
     const accessToken = this.jwtService.sign(payload);
 
@@ -53,29 +75,6 @@ export class AuthService {
       },
     };
   }
-
-  async login(loginDto: LoginDto) {
-    const { username, password } = loginDto;
-
-    // Find user
-    const user = await this.userRepository.findOne({
-      where: { username },
-    });
-
-    if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    // Generate JWT token
-    const payload = { sub: user.id, username: user.username };
-    const accessToken = this.jwtService.sign(payload);
 
     return {
       accessToken,

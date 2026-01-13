@@ -15,11 +15,9 @@ export function useWebSocket(namespace, onMessage) {
   useEffect(() => {
     const token = authApi.getToken();
     if (!token) {
-      console.log('No token found, skipping WebSocket connection');
       return;
     }
 
-    console.log('Connecting to WebSocket...');
     const socket = io(`${API_URL}/${namespace}`, {
       auth: {
         token: token,
@@ -33,20 +31,11 @@ export function useWebSocket(namespace, onMessage) {
       reconnectionAttempts: 5,
     });
 
-    socket.on('connect', () => {
-      console.log('WebSocket connected:', socket.id);
-    });
-
-    socket.on('disconnect', (reason) => {
-      console.log('WebSocket disconnected:', reason);
-    });
-
     socket.on('connect_error', (error) => {
       console.error('WebSocket connection error:', error);
     });
 
     socket.on('new-message', (message) => {
-      console.log('Received new message via WebSocket:', message);
       if (onMessageRef.current) {
         onMessageRef.current(message);
       }
@@ -55,29 +44,22 @@ export function useWebSocket(namespace, onMessage) {
     socketRef.current = socket;
 
     return () => {
-      console.log('Cleaning up WebSocket connection');
       socket.disconnect();
     };
   }, [namespace]);
 
   const joinConversation = (userId) => {
     if (socketRef.current && socketRef.current.connected) {
-      console.log('Joining conversation with user:', userId);
       socketRef.current.emit('join-conversation', { userId });
-    } else {
-      console.warn('Socket not connected, cannot join conversation');
-      if (socketRef.current) {
-        socketRef.current.once('connect', () => {
-          console.log('Socket connected, joining conversation with user:', userId);
-          socketRef.current.emit('join-conversation', { userId });
-        });
-      }
+    } else if (socketRef.current) {
+      socketRef.current.once('connect', () => {
+        socketRef.current.emit('join-conversation', { userId });
+      });
     }
   };
 
   const leaveConversation = (userId) => {
     if (socketRef.current && socketRef.current.connected) {
-      console.log('Leaving conversation with user:', userId);
       socketRef.current.emit('leave-conversation', { userId });
     }
   };

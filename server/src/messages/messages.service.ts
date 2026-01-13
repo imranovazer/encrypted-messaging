@@ -11,6 +11,11 @@ import { Message } from '../entities/message.entity';
 import { User } from '../entities/user.entity';
 import { SendMessageDto } from './dto/send-message.dto';
 import { ChatGateway } from '../gateway/chat.gateway';
+import {
+  mapMessageToDto,
+  mapMessagesToDto,
+  MessageDto,
+} from './utils/message-mapper';
 
 @Injectable()
 export class MessagesService {
@@ -23,20 +28,20 @@ export class MessagesService {
     private chatGateway: ChatGateway,
   ) {}
 
-  async sendMessage(senderId: string, sendMessageDto: SendMessageDto) {
-    const { recipientId, encryptedContent, encryptedAesKey, senderEncryptedAesKey, signature } =
-      sendMessageDto;
+  async sendMessage(
+    senderId: string,
+    sendMessageDto: SendMessageDto,
+  ): Promise<MessageDto> {
+    const {
+      recipientId,
+      encryptedContent,
+      encryptedAesKey,
+      senderEncryptedAesKey,
+      signature,
+    } = sendMessageDto;
 
-    // Verify recipient exists
-    const recipient = await this.userRepository.findOne({
-      where: { id: recipientId },
-    });
+    const recipient = await this.verifyRecipientExists(recipientId);
 
-    if (!recipient) {
-      throw new NotFoundException('Recipient not found');
-    }
-
-    // Create and save message
     const message = this.messageRepository.create({
       senderId,
       recipientId,
@@ -47,59 +52,44 @@ export class MessagesService {
     });
 
     const savedMessage = await this.messageRepository.save(message);
+    const messageWithRelations = await this.loadMessageWithRelations(
+      savedMessage.id,
+    );
 
-    // Load relations for emitting
-    const messageWithRelations = await this.messageRepository.findOne({
-      where: { id: savedMessage.id },
-      relations: ['sender', 'recipient'],
-    });
-
-    // Emit new message event to recipient via WebSocket
     if (messageWithRelations) {
-      const messagePayload = {
-        id: messageWithRelations.id,
-        senderId: messageWithRelations.senderId,
-        recipientId: messageWithRelations.recipientId,
-        sender: {
-          id: messageWithRelations.sender.id,
-          username: messageWithRelations.sender.username,
-        },
-        recipient: {
-          id: messageWithRelations.recipient.id,
-          username: messageWithRelations.recipient.username,
-        },
-        encryptedContent: messageWithRelations.encryptedContent,
-        encryptedAesKey: messageWithRelations.encryptedAesKey,
-        senderEncryptedAesKey: messageWithRelations.senderEncryptedAesKey,
-        signature: messageWithRelations.signature,
-        timestamp: messageWithRelations.timestamp,
-      };
-      await this.chatGateway.emitNewMessage(messagePayload);
-      
-      return {
-        id: messageWithRelations.id,
-        senderId: messageWithRelations.senderId,
-        recipientId: messageWithRelations.recipientId,
-        sender: {
-          id: messageWithRelations.sender.id,
-          username: messageWithRelations.sender.username,
-        },
-        recipient: {
-          id: messageWithRelations.recipient.id,
-          username: messageWithRelations.recipient.username,
-        },
-        encryptedContent: messageWithRelations.encryptedContent,
-        encryptedAesKey: messageWithRelations.encryptedAesKey,
-        senderEncryptedAesKey: messageWithRelations.senderEncryptedAesKey,
-        signature: messageWithRelations.signature,
-        timestamp: messageWithRelations.timestamp,
-      };
+      const messageDto = mapMessageToDto(messageWithRelations);
+      await this.chatGateway.emitNewMessage(messageDto);
+      return messageDto;
     }
 
-    return savedMessage;
+    throw new NotFoundException('Failed to load saved message');
   }
 
-  async getMessages(userId: string, otherUserId?: string) {
+  private async verifyRecipientExists(recipientId: string): Promise<User> {
+    const recipient = await this.userRepository.findOne({
+      where: { id: recipientId },
+    });
+
+    if (!recipient) {
+      throw new NotFoundException('Recipient not found');
+    }
+
+    return recipient;
+  }
+
+  private async loadMessageWithRelations(
+    messageId: string,
+  ): Promise<Message | null> {
+    return this.messageRepository.findOne({
+      where: { id: messageId },
+      relations: ['sender', 'recipient'],
+    });
+  }
+
+  async getMessages(
+    userId: string,
+    otherUserId?: string,
+  ): Promise<MessageDto[]> {
     const queryBuilder = this.messageRepository
       .createQueryBuilder('message')
       .leftJoinAndSelect('message.sender', 'sender')
@@ -117,26 +107,7 @@ export class MessagesService {
     }
 
     const messages = await queryBuilder.getMany();
-
-    // Return messages with only necessary fields (no password hashes)
-    return messages.map((msg) => ({
-      id: msg.id,
-      senderId: msg.senderId,
-      recipientId: msg.recipientId,
-      sender: {
-        id: msg.sender.id,
-        username: msg.sender.username,
-      },
-      recipient: {
-        id: msg.recipient.id,
-        username: msg.recipient.username,
-      },
-      encryptedContent: msg.encryptedContent,
-      encryptedAesKey: msg.encryptedAesKey,
-      senderEncryptedAesKey: msg.senderEncryptedAesKey,
-      signature: msg.signature,
-      timestamp: msg.timestamp,
-    }));
+    return mapMessagesToDto(messages);
   }
 
   async getConversation(userId: string, otherUserId: string) {
@@ -152,7 +123,7 @@ export class MessagesService {
     return this.getMessages(userId, otherUserId);
   }
 
-  async getMessageById(messageId: string, userId: string) {
+  async getMessageById(messageId: string, userId: string): Promise<MessageDto> {
     const message = await this.messageRepository.findOne({
       where: { id: messageId },
       relations: ['sender', 'recipient'],
@@ -162,28 +133,10 @@ export class MessagesService {
       throw new NotFoundException('Message not found');
     }
 
-    // Verify user is either sender or recipient
     if (message.senderId !== userId && message.recipientId !== userId) {
       throw new ForbiddenException('You do not have access to this message');
     }
 
-    return {
-      id: message.id,
-      senderId: message.senderId,
-      recipientId: message.recipientId,
-      sender: {
-        id: message.sender.id,
-        username: message.sender.username,
-      },
-      recipient: {
-        id: message.recipient.id,
-        username: message.recipient.username,
-      },
-      encryptedContent: message.encryptedContent,
-      encryptedAesKey: message.encryptedAesKey,
-      senderEncryptedAesKey: message.senderEncryptedAesKey,
-      signature: message.signature,
-      timestamp: message.timestamp,
-    };
+    return mapMessageToDto(message);
   }
 }

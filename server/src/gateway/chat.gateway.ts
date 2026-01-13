@@ -122,21 +122,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  // Method to emit new message to recipient
   async emitNewMessage(message: any) {
     this.logger.log(`Emitting new message: ${message.id} from ${message.senderId} to ${message.recipientId}`);
-    
-    // Emit to recipient's user room
-    this.server.to(`user:${message.recipientId}`).emit('new-message', message);
-    
-    // Also emit to conversation room
-    const roomName = this.getConversationRoom(message.senderId, message.recipientId);
-    this.server.to(roomName).emit('new-message', message);
-    
-    // Also emit to sender's user room (so sender sees their own message via WebSocket)
-    this.server.to(`user:${message.senderId}`).emit('new-message', message);
-    
-    this.logger.log(`New message emitted to rooms: user:${message.recipientId}, user:${message.senderId}, ${roomName}`);
+
+    const recipientRoom = `user:${message.recipientId}`;
+    const senderRoom = `user:${message.senderId}`;
+    const conversationRoom = this.getConversationRoom(message.senderId, message.recipientId);
+
+    this.server.to(recipientRoom).emit('new-message', message);
+    this.server.to(senderRoom).emit('new-message', message);
+    this.server.to(conversationRoom).emit('new-message', message);
+
+    this.logger.log(`New message emitted to rooms: ${recipientRoom}, ${senderRoom}, ${conversationRoom}`);
   }
 
   // Helper to get consistent room name for a conversation

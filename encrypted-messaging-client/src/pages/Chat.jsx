@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useWebSocket } from '../hooks/useWebSocket.js';
+import { useMessageDecryption } from '../hooks/useMessageDecryption.js';
 import * as usersApi from '../api/users.js';
 import * as messagesApi from '../api/messages.js';
-import { importPublicKey, importPrivateKey, encryptMessage, decryptMessage } from '../utils/crypto.js';
+import { importPublicKey, importPrivateKey, encryptMessage } from '../utils/crypto.js';
 import { getPrivateKey, getPublicKey } from '../utils/keyStorage.js';
+import { sortMessagesByTimestamp, isMessageForUser, isMessageFromUser, createTempMessage } from '../utils/messageUtils.js';
+import { MESSAGE_STATUS, ERROR_MESSAGES } from '../constants/messages.js';
 import UserList from '../components/UserList.jsx';
 import MessageList from '../components/MessageList.jsx';
 import MessageInput from '../components/MessageInput.jsx';
@@ -18,115 +21,93 @@ export default function Chat() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
 
+  const { decryptReceivedMessage, decryptSentMessage } = useMessageDecryption();
+
   const handleNewMessage = useCallback(async (message) => {
-    if (!user?.id) {
-      console.log('No user ID, ignoring message');
-      return;
-    }
-    
-    console.log('Handling new message:', message);
-    
-    const isForMe = message.recipientId === user.id;
-    const isFromMe = message.senderId === user.id;
-    
-    if (!isForMe && !isFromMe) {
-      console.log('Message not for me or from me, ignoring');
-      return;
-    }
+    if (!user?.id) return;
+
+    const isForMe = isMessageForUser(message, user.id);
+    const isFromMe = isMessageFromUser(message, user.id);
+
+    if (!isForMe && !isFromMe) return;
 
     setMessages((prev) => {
       const existing = prev.find((m) => m.id === message.id);
-      
+
       if (isForMe) {
-        if (existing && existing.decryptedContent && existing.decryptedContent !== 'Decrypting...' && existing.decryptedContent !== 'Failed to decrypt') {
-          console.log('Message already exists with decrypted content, skipping');
+        if (existing?.decryptedContent && 
+            existing.decryptedContent !== MESSAGE_STATUS.DECRYPTING && 
+            existing.decryptedContent !== MESSAGE_STATUS.FAILED) {
           return prev;
         }
-        
-        console.log('Decrypting message for me');
-        const privateKeyPEM = getPrivateKey();
-        if (!privateKeyPEM) {
-          console.error('Private key not found');
-          return [...prev.filter((m) => m.id !== message.id), { ...message, decryptedContent: 'Private key not found' }];
-        }
 
-        const privateKey = importPrivateKey(privateKeyPEM);
-        decryptMessage(
-          message.encryptedContent,
-          message.encryptedAesKey,
-          privateKey
-        )
+        const withoutExisting = prev.filter((m) => m.id !== message.id);
+        const messageWithStatus = { ...message, decryptedContent: MESSAGE_STATUS.DECRYPTING };
+        
+        decryptReceivedMessage(message)
           .then((decrypted) => {
-            console.log('Message decrypted successfully');
             setMessages((current) => {
               const exists = current.find((m) => m.id === message.id);
-              if (exists && exists.decryptedContent && exists.decryptedContent !== 'Decrypting...') {
+              if (exists?.decryptedContent && exists.decryptedContent !== MESSAGE_STATUS.DECRYPTING) {
                 return current;
               }
               return current.map((m) =>
-                m.id === message.id ? { ...m, decryptedContent: decrypted } : m
+                m.id === message.id ? decrypted : m
               );
             });
           })
-          .catch((err) => {
-            console.error('Failed to decrypt message:', err);
+          .catch(() => {
             setMessages((current) =>
               current.map((m) =>
-                m.id === message.id ? { ...m, decryptedContent: 'Failed to decrypt' } : m
+                m.id === message.id ? { ...m, decryptedContent: MESSAGE_STATUS.FAILED } : m
               )
             );
           });
 
-        const withoutExisting = prev.filter((m) => m.id !== message.id);
-        return [...withoutExisting, { ...message, decryptedContent: 'Decrypting...' }];
-      } else if (isFromMe) {
-        if (existing) {
-          if (existing.decryptedContent && existing.decryptedContent !== 'Decrypting...' && existing.decryptedContent !== '' && existing.decryptedContent !== '[Sent message]') {
-            console.log('Updating existing sent message');
-            return prev.map((m) => 
-              m.id === message.id ? { ...message, decryptedContent: existing.decryptedContent } : m
-            );
-          }
-          console.log('Message from me already exists, skipping');
-          return prev;
-        }
-        
-        if (message.senderEncryptedAesKey) {
-          console.log('Decrypting sent message via WebSocket');
-          const privateKeyPEM = getPrivateKey();
-          if (privateKeyPEM) {
-            const privateKey = importPrivateKey(privateKeyPEM);
-            decryptMessage(
-              message.encryptedContent,
-              message.senderEncryptedAesKey,
-              privateKey
-            )
-              .then((decrypted) => {
-                setMessages((current) =>
-                  current.map((m) =>
-                    m.id === message.id ? { ...m, decryptedContent: decrypted } : m
-                  )
-                );
-              })
-              .catch((err) => {
-                console.error('Failed to decrypt sent message:', err);
-                setMessages((current) =>
-                  current.map((m) =>
-                    m.id === message.id ? { ...m, decryptedContent: 'Failed to decrypt' } : m
-                  )
-                );
-              });
-          }
-          return [...prev.filter((m) => m.id !== message.id), { ...message, decryptedContent: 'Decrypting...' }];
-        }
-        
-        console.log('Adding new message from me');
-        return [...prev.filter((m) => m.id !== message.id), { ...message, decryptedContent: message.decryptedContent || '[Sent message]' }];
+        return [...withoutExisting, messageWithStatus];
       }
-      
+
+      if (isFromMe) {
+        if (existing?.decryptedContent && 
+            existing.decryptedContent !== MESSAGE_STATUS.DECRYPTING && 
+            existing.decryptedContent !== '' && 
+            existing.decryptedContent !== MESSAGE_STATUS.SENT) {
+          return prev.map((m) =>
+            m.id === message.id ? { ...message, decryptedContent: existing.decryptedContent } : m
+          );
+        }
+
+        if (existing) return prev;
+
+        if (message.senderEncryptedAesKey) {
+          const withoutExisting = prev.filter((m) => m.id !== message.id);
+          const messageWithStatus = { ...message, decryptedContent: MESSAGE_STATUS.DECRYPTING };
+
+          decryptSentMessage(message)
+            .then((decrypted) => {
+              setMessages((current) =>
+                current.map((m) =>
+                  m.id === message.id ? decrypted : m
+                )
+              );
+            })
+            .catch(() => {
+              setMessages((current) =>
+                current.map((m) =>
+                  m.id === message.id ? { ...m, decryptedContent: MESSAGE_STATUS.FAILED } : m
+                )
+              );
+            });
+
+          return [...withoutExisting, messageWithStatus];
+        }
+
+        return [...prev.filter((m) => m.id !== message.id), { ...message, decryptedContent: message.decryptedContent || MESSAGE_STATUS.SENT }];
+      }
+
       return prev;
     });
-  }, [user?.id]);
+  }, [user?.id, decryptReceivedMessage, decryptSentMessage]);
 
   const { joinConversation, leaveConversation } = useWebSocket('chat', handleNewMessage);
 
@@ -151,8 +132,7 @@ export default function Chat() {
       const usersData = await usersApi.getAllUsers();
       setUsers(usersData);
     } catch (err) {
-      setError('Failed to load users');
-      console.error(err);
+      setError(ERROR_MESSAGES.FAILED_TO_LOAD_USERS);
     } finally {
       setLoading(false);
     }
@@ -164,54 +144,27 @@ export default function Chat() {
     try {
       const conversation = await messagesApi.getConversation(selectedUser.id);
       const privateKeyPEM = getPrivateKey();
-      
+
       if (!privateKeyPEM) {
-        setError('Private key not found');
+        setError(ERROR_MESSAGES.PRIVATE_KEY_NOT_FOUND);
         return;
       }
 
-      const privateKey = importPrivateKey(privateKeyPEM);
       const decryptedMessages = await Promise.all(
         conversation.map(async (msg) => {
-          if (msg.recipientId === user.id) {
-            try {
-              const decrypted = await decryptMessage(
-                msg.encryptedContent,
-                msg.encryptedAesKey,
-                privateKey
-              );
-              return { ...msg, decryptedContent: decrypted };
-            } catch (err) {
-              console.error('Failed to decrypt message:', err, msg);
-              return { ...msg, decryptedContent: 'Failed to decrypt' };
-            }
-          } else if (msg.senderId === user.id && msg.senderEncryptedAesKey) {
-            try {
-              const decrypted = await decryptMessage(
-                msg.encryptedContent,
-                msg.senderEncryptedAesKey,
-                privateKey
-              );
-              return { ...msg, decryptedContent: decrypted };
-            } catch (err) {
-              console.error('Failed to decrypt sent message:', err, msg);
-              return { ...msg, decryptedContent: 'Failed to decrypt' };
-            }
+          if (isMessageForUser(msg, user.id)) {
+            return await decryptReceivedMessage(msg);
+          } else if (isMessageFromUser(msg, user.id)) {
+            return await decryptSentMessage(msg);
           } else {
-            return { ...msg, decryptedContent: '[Sent message]' };
+            return { ...msg, decryptedContent: MESSAGE_STATUS.SENT };
           }
         })
       );
 
-      decryptedMessages.sort((a, b) => {
-        const timeA = new Date(a.timestamp || 0).getTime();
-        const timeB = new Date(b.timestamp || 0).getTime();
-        return timeA - timeB;
-      });
-      setMessages(decryptedMessages);
+      setMessages(sortMessagesByTimestamp(decryptedMessages));
     } catch (err) {
-      setError('Failed to load conversation');
-      console.error(err);
+      setError(ERROR_MESSAGES.FAILED_TO_LOAD_CONVERSATION);
     }
   }
 
@@ -224,29 +177,21 @@ export default function Chat() {
     try {
       const recipientPublicKeyPEM = await usersApi.getUserPublicKey(selectedUser.id);
       const recipientPublicKey = importPublicKey(recipientPublicKeyPEM);
-      
+
       const senderPublicKeyPEM = getPublicKey();
       const senderPublicKey = senderPublicKeyPEM ? importPublicKey(senderPublicKeyPEM) : null;
 
-      const { encryptedContent, encryptedAesKey, senderEncryptedAesKey } = await encryptMessage(text, recipientPublicKey, senderPublicKey);
+      const { encryptedContent, encryptedAesKey, senderEncryptedAesKey } = await encryptMessage(
+        text,
+        recipientPublicKey,
+        senderPublicKey
+      );
 
-      const tempId = `temp-${Date.now()}`;
-      const tempMessage = {
-        id: tempId,
-        senderId: user.id,
-        recipientId: selectedUser.id,
-        encryptedContent,
-        encryptedAesKey,
-        decryptedContent: text,
-        sender: { id: user.id, username: user.username },
-        recipient: { id: selectedUser.id, username: selectedUser.username },
-        timestamp: new Date().toISOString(),
-      };
+      const tempMessage = createTempMessage(text, user, selectedUser);
+      tempMessage.encryptedContent = encryptedContent;
+      tempMessage.encryptedAesKey = encryptedAesKey;
 
-      setMessages((prev) => {
-        const updated = [...prev, tempMessage];
-        return updated;
-      });
+      setMessages((prev) => [...prev, tempMessage]);
 
       try {
         const newMessage = await messagesApi.sendMessage(
@@ -257,36 +202,22 @@ export default function Chat() {
         );
 
         const finalMessage = {
-          id: newMessage.id,
-          senderId: newMessage.senderId || user.id,
-          recipientId: newMessage.recipientId || selectedUser.id,
-          encryptedContent: newMessage.encryptedContent,
-          encryptedAesKey: newMessage.encryptedAesKey,
-          signature: newMessage.signature,
-          timestamp: newMessage.timestamp || new Date().toISOString(),
+          ...newMessage,
           decryptedContent: text,
           sender: newMessage.sender || { id: user.id, username: user.username },
           recipient: newMessage.recipient || { id: selectedUser.id, username: selectedUser.username },
         };
-        
+
         setMessages((prev) => {
-          const withoutTemp = prev.filter((m) => m.id !== tempId);
-          const withoutDuplicate = withoutTemp.filter((m) => m.id !== newMessage.id);
-          const updated = [...withoutDuplicate, finalMessage];
-          updated.sort((a, b) => {
-            const timeA = new Date(a.timestamp || 0).getTime();
-            const timeB = new Date(b.timestamp || 0).getTime();
-            return timeA - timeB;
-          });
-          return updated;
+          const withoutTemp = prev.filter((m) => m.id !== tempMessage.id && m.id !== newMessage.id);
+          return sortMessagesByTimestamp([...withoutTemp, finalMessage]);
         });
       } catch (sendErr) {
-        setMessages((prev) => prev.filter((m) => m.id !== tempId));
+        setMessages((prev) => prev.filter((m) => m.id !== tempMessage.id));
         throw sendErr;
       }
     } catch (err) {
-      setError('Failed to send message');
-      console.error(err);
+      setError(ERROR_MESSAGES.FAILED_TO_SEND_MESSAGE);
       setMessages((prev) => prev.filter((m) => !m.id.startsWith('temp-')));
     } finally {
       setSending(false);
