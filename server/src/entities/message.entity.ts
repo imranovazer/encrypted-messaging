@@ -34,7 +34,10 @@ export class Message {
   encryptedAesKey: string;
 
   @Column('text', { nullable: true })
-  signature: string;
+  senderEncryptedAesKey: string | null;
+
+  @Column('text', { nullable: true })
+  signature: string | null;
 
   @CreateDateColumn()
   timestamp: Date;

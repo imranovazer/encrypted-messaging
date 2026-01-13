@@ -15,5 +15,9 @@ export class SendMessageDto {
 
   @IsString()
   @IsOptional()
+  senderEncryptedAesKey?: string;
+
+  @IsString()
+  @IsOptional()
   signature?: string;
 }

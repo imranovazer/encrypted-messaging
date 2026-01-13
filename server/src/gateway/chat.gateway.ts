@@ -8,8 +8,8 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { UseGuards, Logger } from '@nestjs/common';
-import { WsJwtGuard } from './guards/ws-jwt.guard';
+import { Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 
 @WebSocketGateway({
   cors: {
@@ -18,7 +18,6 @@ import { WsJwtGuard } from './guards/ws-jwt.guard';
   },
   namespace: '/chat',
 })
-@UseGuards(WsJwtGuard)
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
@@ -26,22 +25,67 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(ChatGateway.name);
   private userSockets = new Map<string, string>(); // userId -> socketId
 
+  constructor(private jwtService: JwtService) {}
+
   async handleConnection(client: Socket) {
-    const user = client.data.user;
-    if (user) {
-      this.userSockets.set(user.sub, client.id);
-      this.logger.log(`Client connected: ${client.id} (User: ${user.username})`);
+    try {
+      const token = this.extractToken(client);
+      
+      if (!token) {
+        this.logger.warn(`Client ${client.id} connected without token`);
+        client.disconnect();
+        return;
+      }
+
+      const payload = await this.jwtService.verifyAsync(token, {
+        secret: process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+      });
+
+      client.data.user = payload;
+      const userId = payload.sub || payload.userId;
+      
+      if (!userId) {
+        this.logger.error(`Client ${client.id} connected but no user ID in token payload`);
+        client.disconnect();
+        return;
+      }
+
+      this.userSockets.set(userId, client.id);
+      this.logger.log(`Client connected: ${client.id} (User: ${payload.username || 'unknown'}, ID: ${userId})`);
       
       // Join a room for the user
-      client.join(`user:${user.sub}`);
+      client.join(`user:${userId}`);
+    } catch (error) {
+      this.logger.error(`Authentication failed for client ${client.id}: ${error.message}`);
+      client.disconnect();
     }
+  }
+
+  private extractToken(client: Socket): string | undefined {
+    const authHeader = client.handshake.headers.authorization;
+    if (authHeader) {
+      const [type, token] = authHeader.split(' ') ?? [];
+      if (type === 'Bearer' && token) {
+        return token;
+      }
+    }
+
+    const auth = client.handshake.auth;
+    if (auth && auth.token) {
+      return auth.token;
+    }
+
+    return undefined;
   }
 
   handleDisconnect(client: Socket) {
     const user = client.data.user;
     if (user) {
-      this.userSockets.delete(user.sub);
-      this.logger.log(`Client disconnected: ${client.id} (User: ${user.username})`);
+      const userId = user.sub || user.userId;
+      if (userId) {
+        this.userSockets.delete(userId);
+        this.logger.log(`Client disconnected: ${client.id} (User: ${user.username || 'unknown'})`);
+      }
     }
   }
 
@@ -52,10 +96,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const user = client.data.user;
     if (user && data.userId) {
-      // Join a room for the conversation
-      const roomName = this.getConversationRoom(user.sub, data.userId);
-      client.join(roomName);
-      this.logger.log(`User ${user.username} joined conversation with ${data.userId}`);
+      const currentUserId = user.sub || user.userId;
+      if (currentUserId) {
+        // Join a room for the conversation
+        const roomName = this.getConversationRoom(currentUserId, data.userId);
+        client.join(roomName);
+        this.logger.log(`User ${user.username || currentUserId} joined conversation with ${data.userId}`);
+      }
     }
   }
 
@@ -66,14 +113,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const user = client.data.user;
     if (user && data.userId) {
-      const roomName = this.getConversationRoom(user.sub, data.userId);
-      client.leave(roomName);
-      this.logger.log(`User ${user.username} left conversation with ${data.userId}`);
+      const currentUserId = user.sub || user.userId;
+      if (currentUserId) {
+        const roomName = this.getConversationRoom(currentUserId, data.userId);
+        client.leave(roomName);
+        this.logger.log(`User ${user.username || currentUserId} left conversation with ${data.userId}`);
+      }
     }
   }
 
   // Method to emit new message to recipient
   async emitNewMessage(message: any) {
+    this.logger.log(`Emitting new message: ${message.id} from ${message.senderId} to ${message.recipientId}`);
+    
     // Emit to recipient's user room
     this.server.to(`user:${message.recipientId}`).emit('new-message', message);
     
@@ -81,7 +133,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const roomName = this.getConversationRoom(message.senderId, message.recipientId);
     this.server.to(roomName).emit('new-message', message);
     
-    this.logger.log(`New message emitted to recipient ${message.recipientId}`);
+    // Also emit to sender's user room (so sender sees their own message via WebSocket)
+    this.server.to(`user:${message.senderId}`).emit('new-message', message);
+    
+    this.logger.log(`New message emitted to rooms: user:${message.recipientId}, user:${message.senderId}, ${roomName}`);
   }
 
   // Helper to get consistent room name for a conversation

@@ -7,13 +7,17 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { User } from '../entities/user.entity';
 
+const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '24h';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([User]),
     PassportModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'your-secret-key-change-in-production',
-      signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '24h' },
+      signOptions: {
+        expiresIn: jwtExpiresIn as any,
+      },
     }),
   ],
   controllers: [AuthController],

@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, ForbiddenException, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Message } from '../entities/message.entity';
@@ -18,7 +24,8 @@ export class MessagesService {
   ) {}
 
   async sendMessage(senderId: string, sendMessageDto: SendMessageDto) {
-    const { recipientId, encryptedContent, encryptedAesKey, signature } = sendMessageDto;
+    const { recipientId, encryptedContent, encryptedAesKey, senderEncryptedAesKey, signature } =
+      sendMessageDto;
 
     // Verify recipient exists
     const recipient = await this.userRepository.findOne({
@@ -35,7 +42,8 @@ export class MessagesService {
       recipientId,
       encryptedContent,
       encryptedAesKey,
-      signature: signature || null,
+      senderEncryptedAesKey: senderEncryptedAesKey ?? null,
+      signature: signature ?? null,
     });
 
     const savedMessage = await this.messageRepository.save(message);
@@ -62,10 +70,30 @@ export class MessagesService {
         },
         encryptedContent: messageWithRelations.encryptedContent,
         encryptedAesKey: messageWithRelations.encryptedAesKey,
+        senderEncryptedAesKey: messageWithRelations.senderEncryptedAesKey,
         signature: messageWithRelations.signature,
         timestamp: messageWithRelations.timestamp,
       };
       await this.chatGateway.emitNewMessage(messagePayload);
+      
+      return {
+        id: messageWithRelations.id,
+        senderId: messageWithRelations.senderId,
+        recipientId: messageWithRelations.recipientId,
+        sender: {
+          id: messageWithRelations.sender.id,
+          username: messageWithRelations.sender.username,
+        },
+        recipient: {
+          id: messageWithRelations.recipient.id,
+          username: messageWithRelations.recipient.username,
+        },
+        encryptedContent: messageWithRelations.encryptedContent,
+        encryptedAesKey: messageWithRelations.encryptedAesKey,
+        senderEncryptedAesKey: messageWithRelations.senderEncryptedAesKey,
+        signature: messageWithRelations.signature,
+        timestamp: messageWithRelations.timestamp,
+      };
     }
 
     return savedMessage;
@@ -76,10 +104,9 @@ export class MessagesService {
       .createQueryBuilder('message')
       .leftJoinAndSelect('message.sender', 'sender')
       .leftJoinAndSelect('message.recipient', 'recipient')
-      .where(
-        '(message.senderId = :userId OR message.recipientId = :userId)',
-        { userId },
-      )
+      .where('(message.senderId = :userId OR message.recipientId = :userId)', {
+        userId,
+      })
       .orderBy('message.timestamp', 'ASC');
 
     if (otherUserId) {
@@ -106,6 +133,7 @@ export class MessagesService {
       },
       encryptedContent: msg.encryptedContent,
       encryptedAesKey: msg.encryptedAesKey,
+      senderEncryptedAesKey: msg.senderEncryptedAesKey,
       signature: msg.signature,
       timestamp: msg.timestamp,
     }));
@@ -153,6 +181,7 @@ export class MessagesService {
       },
       encryptedContent: message.encryptedContent,
       encryptedAesKey: message.encryptedAesKey,
+      senderEncryptedAesKey: message.senderEncryptedAesKey,
       signature: message.signature,
       timestamp: message.timestamp,
     };

@@ -1,10 +1,11 @@
 import apiClient from './client.js';
 
-export async function sendMessage(recipientId, encryptedContent, encryptedAesKey, signature) {
+export async function sendMessage(recipientId, encryptedContent, encryptedAesKey, senderEncryptedAesKey, signature) {
   return apiClient.post('/messages', {
     recipientId,
     encryptedContent,
     encryptedAesKey,
+    senderEncryptedAesKey,
     signature,
   });
 }

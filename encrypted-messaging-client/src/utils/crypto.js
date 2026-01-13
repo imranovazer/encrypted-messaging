@@ -84,11 +84,16 @@ export async function decryptAES(encrypted, key, iv) {
   return new TextDecoder().decode(decrypted);
 }
 
-export async function encryptMessage(message, recipientPublicKey) {
+export async function encryptMessage(message, recipientPublicKey, senderPublicKey = null) {
   const aesKey = await generateAESKey();
   const aesKeyBase64 = await exportAESKey(aesKey);
   const aesEncrypted = await encryptAES(message, aesKey);
   const encryptedAesKey = encryptRSA(recipientPublicKey, aesKeyBase64);
+  
+  let senderEncryptedAesKey = null;
+  if (senderPublicKey) {
+    senderEncryptedAesKey = encryptRSA(senderPublicKey, aesKeyBase64);
+  }
   
   return {
     encryptedContent: JSON.stringify({
@@ -96,6 +101,7 @@ export async function encryptMessage(message, recipientPublicKey) {
       iv: aesEncrypted.iv,
     }),
     encryptedAesKey,
+    senderEncryptedAesKey,
   };
 }
 
