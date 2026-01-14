@@ -75,14 +75,4 @@ export class AuthService {
       },
     };
   }
-
-    return {
-      accessToken,
-      user: {
-        id: user.id,
-        username: user.username,
-        publicKey: user.publicKey,
-      },
-    };
-  }
 }

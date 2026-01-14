@@ -233,8 +233,8 @@ export default function Chat() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <div className="bg-white shadow">
+    <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
+      <div className="bg-white shadow flex-shrink-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <h1 className="text-2xl font-bold text-gray-900">Encrypted Messaging</h1>
@@ -252,14 +252,14 @@ export default function Chat() {
       </div>
 
       {error && (
-        <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4">
+        <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4 flex-shrink-0">
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
             {error}
           </div>
         </div>
       )}
 
-      <div className="flex-1 flex max-w-7xl mx-auto w-full">
+      <div className="flex-1 flex max-w-7xl mx-auto w-full min-h-0 overflow-hidden">
         <UserList
           users={users}
           selectedUser={selectedUser}
@@ -267,16 +267,18 @@ export default function Chat() {
           currentUserId={user?.id}
         />
 
-        <div className="flex-1 flex flex-col bg-white">
+        <div className="flex-1 flex flex-col bg-white min-h-0 overflow-hidden">
           {selectedUser ? (
             <>
-              <div className="p-4 border-b border-gray-200">
+              <div className="p-4 border-b border-gray-200 flex-shrink-0">
                 <h2 className="text-lg font-semibold text-gray-900">
                   {selectedUser.username}
                 </h2>
               </div>
               <MessageList messages={messages} currentUserId={user?.id} />
-              <MessageInput onSend={handleSendMessage} disabled={sending} />
+              <div className="flex-shrink-0">
+                <MessageInput onSend={handleSendMessage} disabled={sending} />
+              </div>
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-gray-500">
