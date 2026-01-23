@@ -37,7 +37,6 @@ export default function Register() {
       savePublicKey(publicKeyPEM);
 
       await authApi.register(username, password, publicKeyPEM);
-      await authApi.login(username, password);
       
       navigate('/chat');
     } catch (err) {

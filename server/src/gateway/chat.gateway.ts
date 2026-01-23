@@ -38,7 +38,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       const payload = await this.jwtService.verifyAsync(token, {
-        secret: process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+        secret: process.env.JWT_SECRET || 'my-super-secret-key',
       });
 
       client.data.user = payload;

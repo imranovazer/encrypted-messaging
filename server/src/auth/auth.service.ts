@@ -1,18 +1,22 @@
-import { Injectable, ConflictException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, ConflictException, UnauthorizedException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { User } from '../entities/user.entity';
+import { RefreshToken } from '../entities/refresh-token.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { BCRYPT_SALT_ROUNDS } from '../common/constants';
+import { BCRYPT_SALT_ROUNDS, REFRESH_TOKEN_EXPIRES_IN_DAYS } from '../common/constants';
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(RefreshToken)
+    private refreshTokenRepository: Repository<RefreshToken>,
     private jwtService: JwtService,
   ) {}
 
@@ -39,7 +43,7 @@ export class AuthService {
 
     await this.userRepository.save(user);
 
-    return this.generateAuthResponse(user);
+    return await this.generateAuthResponse(user);
   }
 
   async login(loginDto: LoginDto) {
@@ -59,10 +63,62 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    return this.generateAuthResponse(user);
+    return await this.generateAuthResponse(user);
   }
 
-  private generateAuthResponse(user: User) {
+  private async generateAuthResponse(user: User) {
+    const payload = { sub: user.id, username: user.username };
+    const accessToken = this.jwtService.sign(payload);
+
+    await this.revokeUserRefreshTokens(user.id);
+
+    const refreshTokenValue = crypto.randomBytes(64).toString('hex');
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRES_IN_DAYS);
+
+    const refreshToken = this.refreshTokenRepository.create({
+      token: refreshTokenValue,
+      userId: user.id,
+      expiresAt,
+    });
+
+    await this.refreshTokenRepository.save(refreshToken);
+
+    return {
+      accessToken,
+      refreshToken: refreshTokenValue,
+      user: {
+        id: user.id,
+        username: user.username,
+        publicKey: user.publicKey,
+      },
+    };
+  }
+
+  async refreshAccessToken(refreshTokenValue: string) {
+    const refreshToken = await this.refreshTokenRepository.findOne({
+      where: { token: refreshTokenValue },
+      relations: ['user'],
+    });
+
+    if (!refreshToken) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (refreshToken.expiresAt < new Date()) {
+      await this.refreshTokenRepository.remove(refreshToken);
+      throw new UnauthorizedException('Refresh token expired');
+    }
+
+    const user = await this.userRepository.findOne({
+      where: { id: refreshToken.userId },
+    });
+
+    if (!user) {
+      await this.refreshTokenRepository.remove(refreshToken);
+      throw new NotFoundException('User not found');
+    }
+
     const payload = { sub: user.id, username: user.username };
     const accessToken = this.jwtService.sign(payload);
 
@@ -74,5 +130,19 @@ export class AuthService {
         publicKey: user.publicKey,
       },
     };
+  }
+
+  async revokeRefreshToken(refreshTokenValue: string) {
+    const refreshToken = await this.refreshTokenRepository.findOne({
+      where: { token: refreshTokenValue },
+    });
+
+    if (refreshToken) {
+      await this.refreshTokenRepository.remove(refreshToken);
+    }
+  }
+
+  private async revokeUserRefreshTokens(userId: string) {
+    await this.refreshTokenRepository.delete({ userId });
   }
 }

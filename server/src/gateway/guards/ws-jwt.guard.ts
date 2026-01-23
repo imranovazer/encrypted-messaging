@@ -21,7 +21,7 @@ export class WsJwtGuard implements CanActivate {
 
     try {
       const payload = await this.jwtService.verifyAsync(token, {
-        secret: process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+        secret: process.env.JWT_SECRET || 'my-super-secret-key',
       });
       client.data.user = payload;
       this.logger.log(`Token verified for client ${client.id}, user: ${payload.username || payload.sub}`);

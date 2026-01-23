@@ -1,7 +1,8 @@
 export const BCRYPT_SALT_ROUNDS = 10;
 
-export const JWT_DEFAULT_SECRET = 'your-secret-key-change-in-production';
-export const JWT_DEFAULT_EXPIRES_IN = '24h';
+export const JWT_DEFAULT_SECRET = 'my-super-secret-key';
+export const JWT_DEFAULT_EXPIRES_IN = '15m';
+export const REFRESH_TOKEN_EXPIRES_IN_DAYS = 7;
 
 export const DB_DEFAULT_CONFIG = {
   HOST: 'localhost',
