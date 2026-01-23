@@ -15,7 +15,6 @@ export interface MessageDto {
   encryptedContent: string;
   encryptedAesKey: string;
   senderEncryptedAesKey: string | null;
-  signature: string | null;
   timestamp: Date;
 }
 
@@ -35,7 +34,6 @@ export function mapMessageToDto(message: Message): MessageDto {
     encryptedContent: message.encryptedContent,
     encryptedAesKey: message.encryptedAesKey,
     senderEncryptedAesKey: message.senderEncryptedAesKey,
-    signature: message.signature,
     timestamp: message.timestamp,
   };
 }

@@ -37,7 +37,6 @@ export class MessagesService {
       encryptedContent,
       encryptedAesKey,
       senderEncryptedAesKey,
-      signature,
     } = sendMessageDto;
 
     const recipient = await this.verifyRecipientExists(recipientId);
@@ -48,7 +47,6 @@ export class MessagesService {
       encryptedContent,
       encryptedAesKey,
       senderEncryptedAesKey: senderEncryptedAesKey ?? null,
-      signature: signature ?? null,
     });
 
     const savedMessage = await this.messageRepository.save(message);
