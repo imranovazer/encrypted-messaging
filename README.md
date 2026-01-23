@@ -6,6 +6,13 @@ A simple chat app where messages are encrypted before they leave browser. The se
 
 You register, log in, pick a user, and send messages. Each message gets encrypted on your device, sent to the server as ciphertext, and decrypted only on the recipient’s device (and yours, so you can re-read what you sent).
 
+## Demo
+
+<p>
+  <img src="demo/login.png" alt="Login" width="48%" />
+  <img src="demo/chat.png" alt="Chat" width="48%" />
+</p>
+
 ## Encryption & decryption
 
 Here I use hybrid encryption RSA and AES. RSA is used to encrypt AES keys and AES keys are used to encrypt message itself. We don't use RSA for encyrpting message directyl as it is slow and not good in encrypting long messages, but AES is fast and hadle big messages encryption good.
@@ -13,7 +20,7 @@ Here I use hybrid encryption RSA and AES. RSA is used to encrypt AES keys and AE
 When message sent:
 
 1. The app generates a random AES key and encrypts message with it. Each new message have random AES key.
-2. That AES key is then encrypted with the recipient’s RSA public key (and optionally yours, so you can decrypt your own messages later).
+2. That AES key is then encrypted with the recipient’s RSA public key which is stored in db user's data (and optionally yours, so you can decrypt your own messages later).
 3. The server receives: encrypted message + encrypted AES key(s). It has no way to decrypt them.
 
 Message body :
