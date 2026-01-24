@@ -15,11 +15,17 @@ export async function login(username, password) {
   return response;
 }
 
-export async function register(username, password, publicKey) {
+export async function register(
+  username,
+  password,
+  publicKey,
+  encryptedPrivateKeyBackup
+) {
   const response = await apiClient.post('/auth/register', {
     username,
     password,
     publicKey,
+    encryptedPrivateKeyBackup: encryptedPrivateKeyBackup ?? undefined,
   });
   if (response.accessToken) {
     localStorage.setItem('token', response.accessToken);
@@ -28,6 +34,10 @@ export async function register(username, password, publicKey) {
     localStorage.setItem('refreshToken', response.refreshToken);
   }
   return response;
+}
+
+export async function restoreKeys(password) {
+  return apiClient.post('/auth/restore-keys', { password });
 }
 
 export async function refreshToken() {

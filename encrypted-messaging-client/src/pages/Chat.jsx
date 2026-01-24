@@ -2,15 +2,27 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useWebSocket } from '../hooks/useWebSocket.js';
 import { useMessageDecryption } from '../hooks/useMessageDecryption.js';
+import * as authApi from '../api/auth.js';
 import * as usersApi from '../api/users.js';
 import * as messagesApi from '../api/messages.js';
-import { importPublicKey, importPrivateKey, encryptMessage } from '../utils/crypto.js';
-import { getPrivateKey, getPublicKey } from '../utils/keyStorage.js';
-import { sortMessagesByTimestamp, isMessageForUser, isMessageFromUser, createTempMessage } from '../utils/messageUtils.js';
+import {
+  importPublicKey,
+  encryptMessage,
+  decryptPrivateKeyFromBackup,
+} from '../utils/crypto.js';
+import { getPrivateKey, getPublicKey, savePrivateKey, savePublicKey } from '../utils/keyStorage.js';
+import {
+  sortMessagesByTimestamp,
+  isMessageForUser,
+  isMessageFromUser,
+  isMessageInConversation,
+  createTempMessage,
+} from '../utils/messageUtils.js';
 import { MESSAGE_STATUS, ERROR_MESSAGES } from '../constants/messages.js';
 import UserList from '../components/UserList.jsx';
 import MessageList from '../components/MessageList.jsx';
 import MessageInput from '../components/MessageInput.jsx';
+import RestoreKeysForm from '../components/RestoreKeysForm.jsx';
 
 export default function Chat() {
   const { user, logout } = useAuth();
@@ -20,11 +32,23 @@ export default function Chat() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [restorePassword, setRestorePassword] = useState('');
+  const [restoreError, setRestoreError] = useState('');
+  const [restoreLoading, setRestoreLoading] = useState(false);
 
   const { decryptReceivedMessage, decryptSentMessage } = useMessageDecryption();
 
+  const someMessagesFailedToDecrypt =
+    selectedUser && messages.some((m) => m.decryptedContent === MESSAGE_STATUS.FAILED);
+  const needsKeyRestore =
+    error === ERROR_MESSAGES.PRIVATE_KEY_NOT_FOUND || someMessagesFailedToDecrypt;
+  const restoreReason =
+    error === ERROR_MESSAGES.PRIVATE_KEY_NOT_FOUND ? 'no-key' : 'decryption-failed';
+
   const handleNewMessage = useCallback(async (message) => {
     if (!user?.id) return;
+    if (!selectedUser) return;
+    if (!isMessageInConversation(message, user.id, selectedUser.id)) return;
 
     const isForMe = isMessageForUser(message, user.id);
     const isFromMe = isMessageFromUser(message, user.id);
@@ -107,7 +131,7 @@ export default function Chat() {
 
       return prev;
     });
-  }, [user?.id, decryptReceivedMessage, decryptSentMessage]);
+  }, [user?.id, selectedUser?.id, decryptReceivedMessage, decryptSentMessage]);
 
   const { joinConversation, leaveConversation } = useWebSocket('chat', handleNewMessage);
 
@@ -224,6 +248,31 @@ export default function Chat() {
     }
   }
 
+  async function handleRestoreKeys(e) {
+    e.preventDefault();
+    setRestoreError('');
+    setRestoreLoading(true);
+    try {
+      const { encryptedPrivateKeyBackup, publicKey } = await authApi.restoreKeys(restorePassword);
+      const backup =
+        typeof encryptedPrivateKeyBackup === 'string'
+          ? JSON.parse(encryptedPrivateKeyBackup)
+          : encryptedPrivateKeyBackup;
+      const privateKeyPEM = await decryptPrivateKeyFromBackup(backup, restorePassword);
+      savePrivateKey(privateKeyPEM);
+      if (publicKey) savePublicKey(publicKey);
+
+      setError('');
+      setRestoreError('');
+      setRestorePassword('');
+      if (selectedUser) loadConversation();
+    } catch (err) {
+      setRestoreError(err?.message || err?.response?.data?.message || 'Restore failed');
+    } finally {
+      setRestoreLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -257,6 +306,17 @@ export default function Chat() {
             {error}
           </div>
         </div>
+      )}
+
+      {needsKeyRestore && (
+        <RestoreKeysForm
+          reason={restoreReason}
+          password={restorePassword}
+          onPasswordChange={setRestorePassword}
+          onSubmit={handleRestoreKeys}
+          loading={restoreLoading}
+          error={restoreError}
+        />
       )}
 
       <div className="flex-1 flex max-w-7xl mx-auto w-full min-h-0 overflow-hidden">

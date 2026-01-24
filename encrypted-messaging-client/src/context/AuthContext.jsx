@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import * as authApi from '../api/auth.js';
 import * as usersApi from '../api/users.js';
+import { decryptPrivateKeyFromBackup } from '../utils/crypto.js';
+import { savePrivateKey, savePublicKey } from '../utils/keyStorage.js';
 
 const AuthContext = createContext(null);
 
@@ -30,6 +32,19 @@ export function AuthProvider({ children }) {
 
   async function login(username, password) {
     const response = await authApi.login(username, password);
+    const backup = response?.user?.encryptedPrivateKeyBackup;
+    if (backup && typeof backup === 'string') {
+      try {
+        const parsed = JSON.parse(backup);
+        const privateKeyPEM = await decryptPrivateKeyFromBackup(parsed, password);
+        savePrivateKey(privateKeyPEM);
+        if (response.user?.publicKey) {
+          savePublicKey(response.user.publicKey);
+        }
+      } catch (e) {
+        console.error('Failed to restore keys from backup:', e);
+      }
+    }
     await loadUser();
     return response;
   }
@@ -44,6 +59,7 @@ export function AuthProvider({ children }) {
     loading,
     login,
     logout,
+    loadUser,
     isAuthenticated: !!user,
   };
 

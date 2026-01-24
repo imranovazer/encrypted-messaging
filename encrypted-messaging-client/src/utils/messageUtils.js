@@ -14,6 +14,15 @@ export function isMessageFromUser(message, userId) {
   return message.senderId === userId;
 }
 
+export function isMessageInConversation(message, userId, otherUserId) {
+  if (!otherUserId) return false;
+  const { senderId, recipientId } = message;
+  return (
+    (senderId === userId && recipientId === otherUserId) ||
+    (senderId === otherUserId && recipientId === userId)
+  );
+}
+
 export function createTempMessage(text, sender, recipient) {
   return {
     id: `temp-${Date.now()}`,

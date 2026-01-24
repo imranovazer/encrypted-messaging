@@ -1,4 +1,10 @@
-import { Injectable, ConflictException, UnauthorizedException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  UnauthorizedException,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -21,7 +27,8 @@ export class AuthService {
   ) {}
 
   async register(registerDto: RegisterDto) {
-    const { username, password, publicKey } = registerDto;
+    const { username, password, publicKey, encryptedPrivateKeyBackup } =
+      registerDto;
 
     // Check if user already exists
     const existingUser = await this.userRepository.findOne({
@@ -39,6 +46,7 @@ export class AuthService {
       username,
       passwordHash,
       publicKey,
+      encryptedPrivateKeyBackup: encryptedPrivateKeyBackup ?? null,
     });
 
     await this.userRepository.save(user);
@@ -91,6 +99,7 @@ export class AuthService {
         id: user.id,
         username: user.username,
         publicKey: user.publicKey,
+        encryptedPrivateKeyBackup: user.encryptedPrivateKeyBackup ?? undefined,
       },
     };
   }
@@ -129,6 +138,32 @@ export class AuthService {
         username: user.username,
         publicKey: user.publicKey,
       },
+    };
+  }
+
+  async restoreKeys(userId: string, password: string) {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (!user.encryptedPrivateKeyBackup) {
+      throw new BadRequestException(
+        'No key backup found. You registered before this feature existed.',
+      );
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid password');
+    }
+
+    return {
+      encryptedPrivateKeyBackup: user.encryptedPrivateKeyBackup,
+      publicKey: user.publicKey,
     };
   }
 

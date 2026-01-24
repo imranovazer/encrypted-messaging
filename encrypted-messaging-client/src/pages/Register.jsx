@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext.jsx';
 import * as authApi from '../api/auth.js';
-import { generateRSAKeyPair, exportPublicKey, exportPrivateKey } from '../utils/crypto.js';
+import {
+  generateRSAKeyPair,
+  exportPublicKey,
+  exportPrivateKey,
+  encryptPrivateKeyForBackup,
+} from '../utils/crypto.js';
 import { savePrivateKey, savePublicKey } from '../utils/keyStorage.js';
 
 export default function Register() {
@@ -11,6 +17,7 @@ export default function Register() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { loadUser } = useAuth();
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -36,8 +43,15 @@ export default function Register() {
       savePrivateKey(privateKeyPEM);
       savePublicKey(publicKeyPEM);
 
-      await authApi.register(username, password, publicKeyPEM);
-      
+      const backup = await encryptPrivateKeyForBackup(privateKeyPEM, password);
+      await authApi.register(
+        username,
+        password,
+        publicKeyPEM,
+        JSON.stringify(backup)
+      );
+
+      await loadUser();
       navigate('/chat');
     } catch (err) {
       setError(err.message || 'Registration failed');

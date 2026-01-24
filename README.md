@@ -51,8 +51,16 @@ So: **AES encrypts the message, RSA encrypts the AES key.** Hybrid encryption, d
 
 - **Passwords** are hashed with bcrypt—the server never stores your actual password.
 - **Auth** uses JWT tokens; user need a valid token to hit protected routes and connect via WebSockets.
-- **Private keys** stay in user's browser (e.g. localStorage); only public keys are sent to the server.
+- **Private keys** stay in user's browser (e.g. localStorage); only public keys are sent to the server. An encrypted backup of your private key (locked with your password) can be stored on the server so you can restore it on another device or after clearing storage.
 - **WebSockets** are authenticated with the same JWT, so only logged-in users get real-time updates.
+
+## Key backup & restore
+
+If you clear localStorage or log in from another device, your private key is gone and you can’t decrypt messages. To fix that, we back up your private key in a **password‑encrypted** blob on the server.
+
+On **register**, the app encrypts your private key with your password (PBKDF2 + AES‑GCM) and sends that blob to the server. The server stores it but never sees the raw key or your password. On **login**, we send the blob back; the client decrypts it with your password and saves the key in localStorage again. So you can use the app from any device—or after clearing storage—as long as you have your password.
+
+If you’re already logged in but keys are missing (e.g. you cleared storage), the chat page shows a **“Restore keys”** form. Enter your password, we fetch the backup, decrypt it, and you’re back to reading messages. Old accounts created before this feature have no backup; they keep the previous behaviour (keys only in localStorage).
 
 ## JWT & cookies
 

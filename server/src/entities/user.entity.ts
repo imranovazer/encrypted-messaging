@@ -19,6 +19,9 @@ export class User {
   @Column('text')
   publicKey: string;
 
+  @Column('text', { nullable: true })
+  encryptedPrivateKeyBackup: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 }
