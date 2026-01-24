@@ -1,9 +1,7 @@
 export function sortMessagesByTimestamp(messages) {
-  return [...messages].sort((a, b) => {
-    const timeA = new Date(a.timestamp || 0).getTime();
-    const timeB = new Date(b.timestamp || 0).getTime();
-    return timeA - timeB;
-  });
+  return [...messages].sort(
+    (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
+  );
 }
 
 export function isMessageForUser(message, userId) {
@@ -21,6 +19,10 @@ export function isMessageInConversation(message, userId, otherUserId) {
     (senderId === userId && recipientId === otherUserId) ||
     (senderId === otherUserId && recipientId === userId)
   );
+}
+
+export function replaceMessage(messages, messageId, replacement) {
+  return messages.map((m) => (m.id === messageId ? replacement : m));
 }
 
 export function createTempMessage(text, sender, recipient) {

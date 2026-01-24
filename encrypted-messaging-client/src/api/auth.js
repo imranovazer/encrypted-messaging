@@ -1,38 +1,24 @@
 import apiClient from './client.js';
 
+function saveTokens({ accessToken, refreshToken }) {
+  if (accessToken) localStorage.setItem('token', accessToken);
+  if (refreshToken) localStorage.setItem('refreshToken', refreshToken);
+}
 
 export async function login(username, password) {
-  const response = await apiClient.post('/auth/login', {
-    username,
-    password,
-  });
-  if (response.accessToken) {
-    localStorage.setItem('token', response.accessToken);
-  }
-  if (response.refreshToken) {
-    localStorage.setItem('refreshToken', response.refreshToken);
-  }
+  const response = await apiClient.post('/auth/login', { username, password });
+  saveTokens(response);
   return response;
 }
 
-export async function register(
-  username,
-  password,
-  publicKey,
-  encryptedPrivateKeyBackup
-) {
+export async function register(username, password, publicKey, encryptedPrivateKeyBackup) {
   const response = await apiClient.post('/auth/register', {
     username,
     password,
     publicKey,
     encryptedPrivateKeyBackup: encryptedPrivateKeyBackup ?? undefined,
   });
-  if (response.accessToken) {
-    localStorage.setItem('token', response.accessToken);
-  }
-  if (response.refreshToken) {
-    localStorage.setItem('refreshToken', response.refreshToken);
-  }
+  saveTokens(response);
   return response;
 }
 
@@ -42,26 +28,19 @@ export async function restoreKeys(password) {
 
 export async function refreshToken() {
   const refreshToken = localStorage.getItem('refreshToken');
-  if (!refreshToken) {
-    throw new Error('No refresh token available');
-  }
-  const response = await apiClient.post('/auth/refresh', {
-    refreshToken,
-  });
-  if (response.accessToken) {
-    localStorage.setItem('token', response.accessToken);
-  }
+  if (!refreshToken) throw new Error('No refresh token available');
+  const response = await apiClient.post('/auth/refresh', { refreshToken });
+  saveTokens(response);
   return response;
 }
 
 export async function logout() {
-  const refreshToken = localStorage.getItem('refreshToken');
-  if (refreshToken) {
-    try {
-      await apiClient.post('/auth/logout', { refreshToken });
-    } catch (error) {
-      console.error('Logout error:', error);
-    }
+  try {
+    await apiClient.post('/auth/logout', {
+      refreshToken: localStorage.getItem('refreshToken'),
+    });
+  } catch (e) {
+    console.error('Logout error:', e);
   }
   localStorage.removeItem('token');
   localStorage.removeItem('refreshToken');
@@ -69,10 +48,6 @@ export async function logout() {
 
 export function getToken() {
   return localStorage.getItem('token');
-}
-
-export function getRefreshToken() {
-  return localStorage.getItem('refreshToken');
 }
 
 export function isAuthenticated() {

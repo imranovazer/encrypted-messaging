@@ -16,8 +16,10 @@ import {
   isMessageForUser,
   isMessageFromUser,
   isMessageInConversation,
+  replaceMessage,
   createTempMessage,
 } from '../utils/messageUtils.js';
+import { parseJsonIfString } from '../utils/parse.js';
 import { MESSAGE_STATUS, ERROR_MESSAGES } from '../constants/messages.js';
 import UserList from '../components/UserList.jsx';
 import MessageList from '../components/MessageList.jsx';
@@ -46,87 +48,48 @@ export default function Chat() {
     error === ERROR_MESSAGES.PRIVATE_KEY_NOT_FOUND ? 'no-key' : 'decryption-failed';
 
   const handleNewMessage = useCallback(async (message) => {
-    if (!user?.id) return;
-    if (!selectedUser) return;
+    if (!user?.id || !selectedUser) return;
     if (!isMessageInConversation(message, user.id, selectedUser.id)) return;
 
     const isForMe = isMessageForUser(message, user.id);
     const isFromMe = isMessageFromUser(message, user.id);
 
-    if (!isForMe && !isFromMe) return;
-
     setMessages((prev) => {
-      const existing = prev.find((m) => m.id === message.id);
+      const ex = prev.find((m) => m.id === message.id);
+      const skipReceived = ex?.decryptedContent && ex.decryptedContent !== MESSAGE_STATUS.DECRYPTING && ex.decryptedContent !== MESSAGE_STATUS.FAILED;
+      const skipFromMe = ex?.decryptedContent && ex.decryptedContent !== MESSAGE_STATUS.DECRYPTING && ex.decryptedContent !== '' && ex.decryptedContent !== MESSAGE_STATUS.SENT;
 
       if (isForMe) {
-        if (existing?.decryptedContent && 
-            existing.decryptedContent !== MESSAGE_STATUS.DECRYPTING && 
-            existing.decryptedContent !== MESSAGE_STATUS.FAILED) {
-          return prev;
-        }
-
-        const withoutExisting = prev.filter((m) => m.id !== message.id);
-        const messageWithStatus = { ...message, decryptedContent: MESSAGE_STATUS.DECRYPTING };
-        
+        if (skipReceived) return prev;
+        const without = prev.filter((m) => m.id !== message.id);
+        const placeholder = { ...message, decryptedContent: MESSAGE_STATUS.DECRYPTING };
         decryptReceivedMessage(message)
           .then((decrypted) => {
-            setMessages((current) => {
-              const exists = current.find((m) => m.id === message.id);
-              if (exists?.decryptedContent && exists.decryptedContent !== MESSAGE_STATUS.DECRYPTING) {
-                return current;
-              }
-              return current.map((m) =>
-                m.id === message.id ? decrypted : m
-              );
+            setMessages((cur) => {
+              const e = cur.find((m) => m.id === message.id);
+              if (e?.decryptedContent && e.decryptedContent !== MESSAGE_STATUS.DECRYPTING) return cur;
+              return replaceMessage(cur, message.id, decrypted);
             });
           })
           .catch(() => {
-            setMessages((current) =>
-              current.map((m) =>
-                m.id === message.id ? { ...m, decryptedContent: MESSAGE_STATUS.FAILED } : m
-              )
-            );
+            setMessages((cur) => replaceMessage(cur, message.id, { ...message, decryptedContent: MESSAGE_STATUS.FAILED }));
           });
-
-        return [...withoutExisting, messageWithStatus];
+        return [...without, placeholder];
       }
 
       if (isFromMe) {
-        if (existing?.decryptedContent && 
-            existing.decryptedContent !== MESSAGE_STATUS.DECRYPTING && 
-            existing.decryptedContent !== '' && 
-            existing.decryptedContent !== MESSAGE_STATUS.SENT) {
-          return prev.map((m) =>
-            m.id === message.id ? { ...message, decryptedContent: existing.decryptedContent } : m
-          );
+        if (skipFromMe) return replaceMessage(prev, message.id, { ...message, decryptedContent: ex.decryptedContent });
+        if (ex) return prev;
+        if (!message.senderEncryptedAesKey) {
+          const without = prev.filter((m) => m.id !== message.id);
+          return [...without, { ...message, decryptedContent: message.decryptedContent || MESSAGE_STATUS.SENT }];
         }
-
-        if (existing) return prev;
-
-        if (message.senderEncryptedAesKey) {
-          const withoutExisting = prev.filter((m) => m.id !== message.id);
-          const messageWithStatus = { ...message, decryptedContent: MESSAGE_STATUS.DECRYPTING };
-
-          decryptSentMessage(message)
-            .then((decrypted) => {
-              setMessages((current) =>
-                current.map((m) =>
-                  m.id === message.id ? decrypted : m
-                )
-              );
-            })
-            .catch(() => {
-              setMessages((current) =>
-                current.map((m) =>
-                  m.id === message.id ? { ...m, decryptedContent: MESSAGE_STATUS.FAILED } : m
-                )
-              );
-            });
-
-          return [...withoutExisting, messageWithStatus];
-        }
-
-        return [...prev.filter((m) => m.id !== message.id), { ...message, decryptedContent: message.decryptedContent || MESSAGE_STATUS.SENT }];
+        const without = prev.filter((m) => m.id !== message.id);
+        const placeholder = { ...message, decryptedContent: MESSAGE_STATUS.DECRYPTING };
+        decryptSentMessage(message)
+          .then((decrypted) => setMessages((cur) => replaceMessage(cur, message.id, decrypted)))
+          .catch(() => setMessages((cur) => replaceMessage(cur, message.id, { ...message, decryptedContent: MESSAGE_STATUS.FAILED })));
+        return [...without, placeholder];
       }
 
       return prev;
@@ -174,17 +137,12 @@ export default function Chat() {
         return;
       }
 
-      const decryptedMessages = await Promise.all(
-        conversation.map(async (msg) => {
-          if (isMessageForUser(msg, user.id)) {
-            return await decryptReceivedMessage(msg);
-          } else if (isMessageFromUser(msg, user.id)) {
-            return await decryptSentMessage(msg);
-          } else {
-            return { ...msg, decryptedContent: MESSAGE_STATUS.SENT };
-          }
-        })
-      );
+      const decryptOne = async (msg) => {
+        if (isMessageForUser(msg, user.id)) return decryptReceivedMessage(msg);
+        if (isMessageFromUser(msg, user.id)) return decryptSentMessage(msg);
+        return { ...msg, decryptedContent: MESSAGE_STATUS.SENT };
+      };
+      const decryptedMessages = await Promise.all(conversation.map(decryptOne));
 
       setMessages(sortMessagesByTimestamp(decryptedMessages));
     } catch (err) {
@@ -254,10 +212,7 @@ export default function Chat() {
     setRestoreLoading(true);
     try {
       const { encryptedPrivateKeyBackup, publicKey } = await authApi.restoreKeys(restorePassword);
-      const backup =
-        typeof encryptedPrivateKeyBackup === 'string'
-          ? JSON.parse(encryptedPrivateKeyBackup)
-          : encryptedPrivateKeyBackup;
+      const backup = parseJsonIfString(encryptedPrivateKeyBackup);
       const privateKeyPEM = await decryptPrivateKeyFromBackup(backup, restorePassword);
       savePrivateKey(privateKeyPEM);
       if (publicKey) savePublicKey(publicKey);

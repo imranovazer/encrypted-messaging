@@ -36,16 +36,3 @@ export function getPublicKey() {
     return null;
   }
 }
-
-export function hasKeys() {
-  return getPrivateKey() !== null && getPublicKey() !== null;
-}
-
-export function clearKeys() {
-  try {
-    localStorage.removeItem(PRIVATE_KEY_STORAGE_KEY);
-    localStorage.removeItem(PUBLIC_KEY_STORAGE_KEY);
-  } catch (error) {
-    console.error('Failed to clear keys:', error);
-  }
-}

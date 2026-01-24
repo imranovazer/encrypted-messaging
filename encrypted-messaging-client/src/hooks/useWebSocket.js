@@ -19,12 +19,8 @@ export function useWebSocket(namespace, onMessage) {
     }
 
     const socket = io(`${API_URL}/${namespace}`, {
-      auth: {
-        token: token,
-      },
-      extraHeaders: {
-        Authorization: `Bearer ${token}`,
-      },
+      auth: { token },
+      extraHeaders: { Authorization: `Bearer ${token}` },
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1000,

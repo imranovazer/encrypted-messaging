@@ -3,6 +3,7 @@ import * as authApi from '../api/auth.js';
 import * as usersApi from '../api/users.js';
 import { decryptPrivateKeyFromBackup } from '../utils/crypto.js';
 import { savePrivateKey, savePublicKey } from '../utils/keyStorage.js';
+import { parseJsonIfString } from '../utils/parse.js';
 
 const AuthContext = createContext(null);
 
@@ -33,14 +34,12 @@ export function AuthProvider({ children }) {
   async function login(username, password) {
     const response = await authApi.login(username, password);
     const backup = response?.user?.encryptedPrivateKeyBackup;
-    if (backup && typeof backup === 'string') {
+    if (backup) {
       try {
-        const parsed = JSON.parse(backup);
+        const parsed = parseJsonIfString(backup);
         const privateKeyPEM = await decryptPrivateKeyFromBackup(parsed, password);
         savePrivateKey(privateKeyPEM);
-        if (response.user?.publicKey) {
-          savePublicKey(response.user.publicKey);
-        }
+        if (response.user?.publicKey) savePublicKey(response.user.publicKey);
       } catch (e) {
         console.error('Failed to restore keys from backup:', e);
       }
